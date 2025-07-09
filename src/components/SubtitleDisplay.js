@@ -10,7 +10,9 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
   const [issues, setIssues] = useState([]);
   const [showIssues, setShowIssues] = useState(false);
   const transcriptRef = useRef(null);
+  const nearbySubtitlesRef = useRef(null);
   const [highlightedTranscript, setHighlightedTranscript] = useState('');
+  const [autoScroll, setAutoScroll] = useState(true);
   
   // 加载并解析 SRT 文件
   useEffect(() => {
@@ -66,13 +68,25 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
         // 滚动到高亮位置
         setTimeout(() => {
           const highlightElement = transcriptRef.current?.querySelector('.highlight');
-          if (highlightElement) {
+          if (highlightElement && autoScroll) {
             highlightElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 100);
+        
+        // 滚动附近字幕区域，确保当前字幕在视图中，但不强制移动页面
+        setTimeout(() => {
+          const activeElement = nearbySubtitlesRef.current?.querySelector('.active-subtitle');
+          if (activeElement && autoScroll) {
+            activeElement.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'nearest', 
+              inline: 'nearest' 
+            });
           }
         }, 100);
       }
     }
-  }, [currentTime, subtitles, transcript]);
+  }, [currentTime, subtitles, transcript, autoScroll]);
   
   // 在文字稿中高亮显示当前字幕文本
   const highlightText = (fullText, textToHighlight) => {
@@ -114,10 +128,30 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
     }
   };
   
-  // 显示最近的几个字幕
-  const nearbySubtitles = subtitles
-    .filter(sub => Math.abs(sub.start - currentTime) < 30)
-    .slice(0, 5);
+  // 获取附近字幕列表（不限制条数）
+  const getNearbySubtitles = () => {
+    if (!subtitles.length) return [];
+    
+    if (!activeSubtitle) {
+      // 如果没有活跃字幕，返回所有字幕
+      return subtitles;
+    }
+    
+    const currentIndex = subtitles.findIndex(sub => 
+      activeSubtitle && sub.start === activeSubtitle.start
+    );
+    
+    if (currentIndex === -1) return subtitles;
+    
+    // 计算前20条和后10条的索引范围，类似于时间轴的效果
+    const startIndex = Math.max(0, currentIndex - 20);
+    const endIndex = Math.min(subtitles.length, currentIndex + 11);
+    
+    return subtitles.slice(startIndex, endIndex);
+  };
+  
+  // 获取附近字幕
+  const nearbySubtitles = getNearbySubtitles();
   
   return (
     <div className="space-y-6">
@@ -143,6 +177,17 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
           className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md shadow-sm text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"
         >
           {issues.length > 0 ? `查看问题 (${issues.length})` : '无字幕问题'}
+        </button>
+        
+        <button
+          onClick={() => setAutoScroll(!autoScroll)}
+          className={`inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
+            autoScroll
+              ? 'text-white bg-green-600 hover:bg-green-700'
+              : 'text-white bg-gray-500 hover:bg-gray-600'
+          }`}
+        >
+          {autoScroll ? '自动滚动: 开' : '自动滚动: 关'}
         </button>
         
         <div className="inline-flex items-center rounded-md shadow-sm ml-auto">
@@ -235,30 +280,75 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
         </div>
       </div>
       
+      {/* 修改后的附近字幕区域（采用时间轴样式） */}
       <div className="bg-white rounded-xl shadow-md p-6 transition-shadow hover:shadow-lg">
-        <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">字幕时间轴</h3>
-        <div className="space-y-2">
-          {nearbySubtitles.map((sub, index) => (
-            <div 
-              key={index} 
-              onClick={() => jumpToSubtitle(sub)}
-              className={`p-3 rounded-md cursor-pointer transition-colors ${
-                activeSubtitle && activeSubtitle.start === sub.start
-                  ? 'bg-blue-50 border-l-4 border-blue-500'
-                  : 'bg-gray-50 hover:bg-blue-50'
-              }`}
-            >
-              <div className="text-gray-800">{sub.text}</div>
-              <div className="text-sm text-gray-500 mt-1">
-                {sub.formattedStart} - {sub.formattedEnd}
+        <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">附近字幕</h3>
+        
+        {/* 字幕时间轴指示器 */}
+        <div className="relative mb-4">
+          <div className="h-2 bg-gray-200 rounded-full">
+            {subtitles.length > 0 && (
+              <div 
+                className="absolute h-2 bg-blue-500 rounded-full"
+                style={{ 
+                  left: '0', 
+                  width: `${(currentTime / subtitles[subtitles.length - 1].end) * 100}%`,
+                  transition: 'width 0.3s ease-in-out'
+                }}
+              />
+            )}
+          </div>
+        </div>
+        
+        {/* 字幕滚动区域 */}
+        <div 
+          ref={nearbySubtitlesRef}
+          className="flex overflow-x-auto pb-4 timeline-container"
+          style={{ scrollbarWidth: 'thin' }}
+        >
+          {nearbySubtitles.map((sub, index) => {
+            const isActive = activeSubtitle && activeSubtitle.start === sub.start;
+            const isPast = activeSubtitle && sub.end < activeSubtitle.start;
+            const isFuture = activeSubtitle && sub.start > activeSubtitle.end;
+            
+            let positionClass = '';
+            if (isPast) positionClass = 'past-subtitle';
+            if (isFuture) positionClass = 'future-subtitle';
+            
+            return (
+              <div 
+                key={index} 
+                onClick={() => jumpToSubtitle(sub)}
+                className={`flex-shrink-0 p-3 mx-1 rounded-md cursor-pointer transition-all ${positionClass} ${
+                  isActive 
+                    ? 'active-subtitle bg-blue-100 border-b-4 border-blue-500 min-w-[200px] transform scale-105'
+                    : 'bg-gray-50 hover:bg-blue-50 min-w-[180px]'
+                }`}
+              >
+                <div 
+                  className={`text-sm ${isActive ? 'text-blue-800 font-medium' : 'text-gray-800'}`}
+                  style={{ fontSize: `${Math.max(12, fontSize - 2)}px` }}
+                >
+                  {sub.text}
+                </div>
+                <div className={`text-xs mt-1 ${isActive ? 'text-blue-600' : 'text-gray-500'}`}>
+                  {sub.formattedStart} - {sub.formattedEnd}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           {nearbySubtitles.length === 0 && (
-            <p className="text-center py-4 text-gray-500">
+            <p className="text-center py-4 text-gray-500 w-full">
               没有可显示的字幕
             </p>
           )}
+        </div>
+        
+        {/* 导航提示 */}
+        <div className="flex justify-between text-xs text-gray-500 mt-2">
+          <span>← 前20条字幕</span>
+          <span>当前位置</span>
+          <span>后10条字幕 →</span>
         </div>
       </div>
       
@@ -280,6 +370,40 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
           100% {
             box-shadow: 0 0 0 0 rgba(254, 240, 138, 0);
           }
+        }
+        
+        .timeline-container {
+          scrollbar-width: thin;
+          scrollbar-color: #93c5fd #e5e7eb;
+          scroll-behavior: smooth;
+          padding: 8px 0;
+        }
+        
+        .timeline-container::-webkit-scrollbar {
+          height: 6px;
+        }
+        
+        .timeline-container::-webkit-scrollbar-track {
+          background: #e5e7eb;
+          border-radius: 3px;
+        }
+        
+        .timeline-container::-webkit-scrollbar-thumb {
+          background-color: #93c5fd;
+          border-radius: 3px;
+        }
+        
+        .active-subtitle {
+          box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+          z-index: 10;
+        }
+        
+        .past-subtitle {
+          opacity: 0.8;
+        }
+        
+        .future-subtitle {
+          opacity: 0.9;
         }
       `}</style>
     </div>
