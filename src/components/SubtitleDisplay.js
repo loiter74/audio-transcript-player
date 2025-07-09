@@ -14,6 +14,14 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
   const [highlightedTranscript, setHighlightedTranscript] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
   
+  // 计算中文字数 - 直接计算字符数
+  const countChineseChars = (text) => {
+    if (!text) return 0;
+    // 移除空格、标点符号等，只保留实际字符
+    const cleanedText = text.replace(/[\s\p{P}]/gu, '');
+    return cleanedText.length;
+  };
+  
   // 加载并解析 SRT 文件
   useEffect(() => {
     if (srtFile) {
@@ -22,15 +30,27 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
         const content = e.target.result;
         const enhancedSubtitles = parseAndEnhanceSRT(content);
         
-        // 移除字幕中的逗号和句号
-        const processedSubtitles = enhancedSubtitles.map(sub => ({
-          ...sub,
-          text: sub.text.replace(/[,\.]/g, '')
-        }));
+        // 移除字幕中的逗号和句号，并计算正确的汉字字数
+        const processedSubtitles = enhancedSubtitles.map(sub => {
+          const cleanedText = sub.text.replace(/[,\.]/g, '');
+          // 计算汉字字数
+          const charCount = countChineseChars(cleanedText);
+          
+          // 确保字符速率计算不会出现无穷大
+          const duration = Math.max(0.1, sub.end - sub.start); // 确保持续时间至少为0.1秒
+          const charRate = charCount / duration;
+          
+          return {
+            ...sub,
+            text: cleanedText,
+            words: charCount, // 使用汉字字数
+            charRate: charRate.toFixed(2)
+          };
+        });
         
         setSubtitles(processedSubtitles);
         
-        // 查找字幕中的潜在问题
+        // 使用修正后的字幕查找问题
         const subtitleIssues = findSubtitleIssues(processedSubtitles);
         setIssues(subtitleIssues);
       };
@@ -153,6 +173,14 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
   // 获取附近字幕
   const nearbySubtitles = getNearbySubtitles();
   
+  // 获取字幕问题详情
+  const getIssueDetails = (issue) => {
+    if (issue.type === 'charRate') {
+      return `字幕 #${issue.index} 的字符速率过快 (${issue.value} 字符/秒)`;
+    }
+    return issue.message;
+  };
+  
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-2 items-center">
@@ -230,7 +258,7 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
               <div className="mt-2 text-sm text-amber-700">
                 <ul className="list-disc pl-5 space-y-1">
                   {issues.slice(0, 5).map((issue, index) => (
-                    <li key={index}>{issue.message}</li>
+                    <li key={index}>{getIssueDetails(issue)}</li>
                   ))}
                   {issues.length > 5 && (
                     <li>...还有 {issues.length - 5} 个问题</li>
@@ -254,7 +282,7 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
           {activeSubtitle && (
             <div className="mt-3 flex justify-between text-sm text-gray-500">
               <span>时间: {activeSubtitle.formattedStart} - {activeSubtitle.formattedEnd}</span>
-              <span>字数: {activeSubtitle.words} 词</span>
+              <span>字数: {activeSubtitle.words || 0} 字</span>
             </div>
           )}
         </div>
@@ -331,8 +359,9 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
                 >
                   {sub.text}
                 </div>
-                <div className={`text-xs mt-1 ${isActive ? 'text-blue-600' : 'text-gray-500'}`}>
-                  {sub.formattedStart} - {sub.formattedEnd}
+                <div className={`text-xs mt-1 flex justify-between ${isActive ? 'text-blue-600' : 'text-gray-500'}`}>
+                  <span>{sub.formattedStart} - {sub.formattedEnd}</span>
+                  <span>{sub.words || 0}字</span>
                 </div>
               </div>
             );
