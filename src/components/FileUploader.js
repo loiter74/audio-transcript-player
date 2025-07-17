@@ -11,6 +11,7 @@ const FileUploader = ({ onFilesUploaded }) => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [debugLog, setDebugLog] = useState(''); // 调试日志
+  const [showDebug, setShowDebug] = useState(false); // 是否显示调试面板
 
   const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 
@@ -238,6 +239,18 @@ const FileUploader = ({ onFilesUploaded }) => {
     let webPath = '';
     let base64 = '';
 
+    // 推断mimeType
+    const extToMime = {
+      '.mp3': 'audio/mpeg',
+      '.wav': 'audio/wav',
+      '.m4a': 'audio/mp4',
+      '.aac': 'audio/aac',
+      '.ogg': 'audio/ogg',
+      '.flac': 'audio/flac'
+    };
+    const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+    const mimeType = file.type || extToMime[fileExtension] || 'audio/mpeg';
+
     // 安卓端 content:// 路径处理
     if (file.path && file.path.startsWith('content://')) {
       try {
@@ -245,12 +258,12 @@ const FileUploader = ({ onFilesUploaded }) => {
         base64 = result.data;
         // 优先用blob URL
         try {
-          const blob = b64toBlob(base64, file.type || 'audio/mpeg');
+          const blob = b64toBlob(base64, mimeType);
           webPath = URL.createObjectURL(blob);
           console.log('安卓 content:// 处理后 blob webPath:', webPath);
         } catch (blobErr) {
           // fallback到data URL
-          webPath = `data:${file.type || 'audio/mpeg'};base64,${base64}`;
+          webPath = `data:${mimeType};base64,${base64}`;
           console.log('安卓 content:// 处理后 fallback dataURL webPath:', webPath.slice(0, 100));
         }
       } catch (err) {
@@ -259,19 +272,30 @@ const FileUploader = ({ onFilesUploaded }) => {
       }
     } else {
       // 其他情况用 blob URL
-      webPath = URL.createObjectURL(file);
+      const blob = new Blob([file], { type: mimeType });
+      webPath = URL.createObjectURL(blob);
       console.log('普通文件 webPath:', webPath);
     }
 
-    setAudioFile({
+    // 构建统一的 fileObj
+    const fileObj = {
       name: file.name,
-      type: file.type,
+      type: mimeType,
       size: file.size,
       webPath,
       file,
       base64,
       path: file.path,
-    });
+    };
+
+    // 根据 fileType 设置对应的 state
+    if (fileType === 'audio') {
+      setAudioFile(fileObj);
+    } else if (fileType === 'srt') {
+      setSrtFile(fileObj);
+    } else if (fileType === 'txt') {
+      setTxtFile(fileObj);
+    }
   };
 
   const readFileContent = async (fileObj) => {
@@ -380,7 +404,23 @@ const FileUploader = ({ onFilesUploaded }) => {
         </div>
       )}
       
-      {/* 调试日志面板已移除 */}
+      {/* 调试日志面板，仅开发环境显示 */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="mb-4">
+          <button
+            type="button"
+            className="text-xs text-blue-500 underline mb-1"
+            onClick={() => setShowDebug(v => !v)}
+          >
+            {showDebug ? '收起调试日志' : '展开调试日志'}
+          </button>
+          {showDebug && (
+            <pre className="max-h-48 overflow-y-auto bg-gray-900 text-green-200 text-xs p-2 rounded border border-gray-300 whitespace-pre-wrap">
+              {debugLog || '暂无调试信息'}
+            </pre>
+          )}
+        </div>
+      )}
       
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>

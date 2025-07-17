@@ -1,8 +1,18 @@
 import React, { useRef, useEffect, useState } from 'react';
 
-const isAndroid = /Android/i.test(navigator.userAgent);
+const AudioControls = (props) => {
+  const isAndroid = /Android/i.test(navigator.userAgent);
 
-const AudioControls = ({ audioFile, currentTime, setCurrentTime, isPlaying, setIsPlaying, duration, setDuration, onActiveParagraphChange }) => {
+  const {
+    audioFile,
+    currentTime,
+    setCurrentTime,
+    isPlaying,
+    setIsPlaying,
+    duration,
+    setDuration,
+    onActiveParagraphChange
+  } = props;
   const audioRef = useRef(null);
   const [triedUnmuted, setTriedUnmuted] = useState(false);
 
@@ -116,6 +126,9 @@ const AudioControls = ({ audioFile, currentTime, setCurrentTime, isPlaying, setI
     }
   }, [isPlaying]);
 
+  // 移除安卓端 return null，让安卓端也渲染完整UI
+  // if (isAndroid) return null;
+
   return (
     <div className="flex flex-col items-center w-full max-w-4xl mx-auto mb-4">
       <div className="flex items-center gap-4 mb-2 w-full">
@@ -167,14 +180,22 @@ const AudioControls = ({ audioFile, currentTime, setCurrentTime, isPlaying, setI
           onError={e => {
             console.error('[AudioControls] audio onError', e, {
               src: audioRef.current?.src,
-              paused: audioRef.current?.paused,
-              muted: audioRef.current?.muted,
-              currentTime: audioRef.current?.currentTime,
-              readyState: audioRef.current?.readyState,
+              type: audioFile?.type,
+              size: audioFile?.size,
               error: audioRef.current?.error
             });
+            alert('音频播放出错：文件格式可能不被支持，建议重新导出为标准mp3或wav。');
           }}
         />
+        {/* 调试信息 */}
+        <div className="text-xs text-gray-400 break-all mt-1">
+          src: {(audioFile?.webPath || (audioFile?.file ? URL.createObjectURL(audioFile.file) : ''))?.slice(0, 80)}...<br />
+          type: {audioFile?.type || '未知'}<br />
+          size: {audioFile?.size || '未知'}
+        </div>
+        {!audioFile?.webPath && !audioFile?.file && (
+          <div className="text-red-500 text-xs mt-1">未选择有效音频文件，或格式不被支持</div>
+        )}
         <div className="flex flex-col items-center w-full flex-1">
           <div className="flex items-center justify-between w-full text-xs text-gray-500 mb-1">
             <span>{formatTime(currentTime)}</span>

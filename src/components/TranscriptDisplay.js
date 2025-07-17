@@ -11,14 +11,18 @@ const TranscriptDisplay = ({ transcript, highlightIndex, opacity = 0.95 }) => {
     }
   }, [highlightIndex]);
 
-  // 只让背景透明，字体不透明
-  const bgColor = `rgba(255,255,255,${opacity})`;
+  // 用CSS变量自动适配暗色/亮色
+  const bgColor = `rgba(var(--transcript-bg), ${opacity})`;
 
   return (
     <div
       ref={containerRef}
-      className="max-h-[60vh] overflow-y-auto rounded-lg p-6 border border-gray-200 text-base text-gray-800 leading-relaxed shadow-md"
-      style={{fontSize: '1.1rem', background: bgColor, color: '#222'}}
+      className="max-h-[60vh] overflow-y-auto rounded-lg p-6 border border-gray-200 text-base leading-relaxed shadow-md text-gray-800 dark:text-white"
+      style={{
+        fontSize: '1.1rem',
+        background: `rgba(var(--transcript-bg), ${opacity})`,
+        backgroundColor: `rgba(var(--transcript-bg), ${opacity}) !important`
+      }}
     >
       {paragraphs.length === 0 ? (
         <div className="text-gray-400 text-center">暂无正文</div>

@@ -21,13 +21,29 @@ const BgImageUploader = ({ bgOpacity, onBgImageChange, onOpacityChange }) => {
 
   return (
     <>
-      <button
-        className="px-4 py-2 bg-blue-500 text-white rounded shadow hover:bg-blue-600 focus:outline-none text-base md:text-sm"
-        onClick={() => setShowModal(true)}
-        type="button"
-      >
-        上传背景图片
-      </button>
+      {isMobile ? (
+        <button
+          className="w-14 h-14 flex items-center justify-center bg-blue-500 rounded-xl shadow hover:bg-blue-600 focus:outline-none"
+          onClick={() => setShowModal(true)}
+          type="button"
+          style={{padding: 0}}
+        >
+          {/* 上传图片SVG图标（MIT Bootstrap Icons）*/}
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="feather feather-upload">
+            <rect x="3" y="3" width="18" height="18" rx="4" fill="#3b82f6"/>
+            <path d="M12 16V8M8 12l4-4 4 4" stroke="white"/>
+            <path d="M8 16h8" stroke="white"/>
+          </svg>
+        </button>
+      ) : (
+        <button
+          className="px-4 py-2 bg-blue-500 text-white rounded shadow hover:bg-blue-600 focus:outline-none text-base md:text-sm"
+          onClick={() => setShowModal(true)}
+          type="button"
+        >
+          上传背景图片
+        </button>
+      )}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-lg shadow-lg p-8 relative w-full max-w-md mx-auto" ref={dropRef}

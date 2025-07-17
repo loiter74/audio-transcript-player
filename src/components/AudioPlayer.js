@@ -43,6 +43,10 @@ const AudioPlayer = ({ audioFile, onTimeUpdate }) => {
   // 新增：累计播放时间和播放起点
   const [accumulatedTime, setAccumulatedTime] = useState(0);
   const playStartTimeRef = useRef(null);
+  // 新增：防止重复操作
+  const [isOperating, setIsOperating] = useState(false);
+  // 新增：防止暂停后自动回播
+  const recentlyPausedRef = useRef(false);
 
   useEffect(() => {
     if (!audioFile) return;
@@ -70,7 +74,8 @@ const AudioPlayer = ({ audioFile, onTimeUpdate }) => {
 
   // 安卓端：播放/暂停控制
   const handleNativePlayPause = async () => {
-    if (!audioFile) return;
+    if (!audioFile || isOperating) return;
+    setIsOperating(true);
     try {
       if (isAndroid) {
         console.log('Android端播放，权限检查已简化');
@@ -79,6 +84,11 @@ const AudioPlayer = ({ audioFile, onTimeUpdate }) => {
       // 统一获取可播放路径
       const assetPath = await getPlayableFilePath(audioFile);
       if (!isPlaying) {
+        // 播放前判断是否刚刚暂停，避免误触发
+        if (recentlyPausedRef.current) {
+          setIsOperating(false);
+          return;
+        }
         if (!isLoaded) {
           await NativeAudio.preload({
             assetId,
@@ -103,7 +113,19 @@ const AudioPlayer = ({ audioFile, onTimeUpdate }) => {
         startTimeUpdateTimer();
       } else {
         if (mediaId) {
-          await NativeAudio.pause({ assetId: mediaId });
+          // 优先stop，pause仅兼容
+          try {
+            await NativeAudio.stop({ assetId: mediaId });
+            await NativeAudio.unload({ assetId: mediaId });
+          } catch (e) {
+            try {
+              await NativeAudio.pause({ assetId: mediaId });
+              await NativeAudio.unload({ assetId: mediaId });
+            } catch (e2) {
+              setError('安卓暂停失败: ' + (e2.message || e2));
+            }
+          }
+          setIsLoaded(false); // 下次需重新preload
         }
         setIsPlaying(false);
         // 累加已播放时间
@@ -112,10 +134,15 @@ const AudioPlayer = ({ audioFile, onTimeUpdate }) => {
           return prev + played;
         });
         stopTimeUpdateTimer();
+        playStartTimeRef.current = null;
+        recentlyPausedRef.current = true;
+        setTimeout(() => { recentlyPausedRef.current = false; }, 800);
       }
     } catch (e) {
       setError('安卓原生音频播放出错: ' + (e.message || e));
       console.error('[AudioPlayer] 播放出错:', e, audioFile);
+    } finally {
+      setIsOperating(false);
     }
   };
 
@@ -247,6 +274,7 @@ const AudioPlayer = ({ audioFile, onTimeUpdate }) => {
         <div className="flex flex-col items-center space-y-4">
           <button
             onClick={handleNativePlayPause}
+            disabled={isOperating}
             className={`w-24 h-24 flex items-center justify-center text-white rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
               isPlaying ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
             }`}
@@ -268,7 +296,7 @@ const AudioPlayer = ({ audioFile, onTimeUpdate }) => {
               <span>{formatTime(currentTime)}</span>
               <span>{duration > 0 ? formatTime(duration) : '--:--'}</span>
             </div>
-            <div className="h-2 bg-gray-200 rounded-full">
+            <div className="h-2 bg-gray-200 rounded-full cursor-pointer" onClick={() => alert('安卓原生音频暂不支持拖动进度条')}> 
               <div 
                 className="h-full bg-blue-600 rounded-full transition-all duration-100"
                 style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
@@ -291,6 +319,15 @@ const AudioPlayer = ({ audioFile, onTimeUpdate }) => {
             preload="metadata"
             controls
           />
+          {/* 调试信息 */}
+          <div className="text-xs text-gray-400 break-all mt-1">
+            src: {audioUrl?.slice(0, 80)}...<br />
+            type: {audioFile?.type || '未知'}<br />
+            size: {audioFile?.size || '未知'}
+          </div>
+          {!audioUrl && (
+            <div className="text-red-500 text-xs mt-1">未选择有效音频文件，或格式不被支持</div>
+          )}
           <div className="space-y-4">
             <div
               className="h-4 bg-gray-200 rounded-full cursor-pointer relative"

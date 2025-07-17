@@ -3,7 +3,7 @@ import { parseAndEnhanceSRT, findSubtitleIssues } from '../utils/enhancedSrtPars
 import ReactMarkdown from 'react-markdown';
 import BgImageUploader from './BgImageUploader';
 
-const SubtitleDisplay = ({ audioFile, srtFile, txtFile, currentTime, setCurrentTime, bgImage, bgOpacity, onBgImageChange, onOpacityChange, debugLog, setHighlightIndex }) => {
+const SubtitleDisplay = ({ audioFile, srtFile, txtFile, currentTime, setCurrentTime, bgImage, bgOpacity, onBgImageChange, onOpacityChange, debugLog, setHighlightIndex, showFloat, setShowFloat }) => {
   const [subtitles, setSubtitles] = useState([]);
   const [transcript, setTranscript] = useState('');
   const [activeSubtitle, setActiveSubtitle] = useState(null);
@@ -14,7 +14,6 @@ const SubtitleDisplay = ({ audioFile, srtFile, txtFile, currentTime, setCurrentT
   const nearbySubtitlesRef = useRef(null);
   const [highlightedTranscript, setHighlightedTranscript] = useState('');
   const [formattedTranscript, setFormattedTranscript] = useState('');
-  const [showFloat, setShowFloat] = useState(true);
   const [floatPos, setFloatPos] = useState({ x: 100, y: 100 });
   const floatRef = useRef();
   const dragOffset = useRef({ x: 0, y: 0 });
@@ -351,6 +350,9 @@ const SubtitleDisplay = ({ audioFile, srtFile, txtFile, currentTime, setCurrentT
     }
   };
   
+  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
+  // 移除右上角操作区的按钮，只保留悬浮字幕浮窗
   return (
     <>
       {showFloat && (
@@ -424,21 +426,6 @@ const SubtitleDisplay = ({ audioFile, srtFile, txtFile, currentTime, setCurrentT
           </div>
         </div>
       )}
-      
-      <div className="fixed top-4 right-4 z-50 flex items-center gap-2">
-        <BgImageUploader
-          bgOpacity={bgOpacity}
-          onBgImageChange={onBgImageChange}
-          onOpacityChange={onOpacityChange}
-        />
-        <button
-          className="px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 focus:outline-none"
-          onClick={() => setShowFloat(v => !v)}
-        >
-          {showFloat ? '隐藏悬浮字幕' : '显示悬浮字幕'}
-        </button>
-      </div>
-      
       <style jsx global>{`
          .highlight {
            background-color: #fef08a;

@@ -45,3 +45,43 @@
     font-size: 14px;
   }
 }
+
+/* 暗色模式全局样式 */
+:root {
+  --transcript-bg-light: 255,255,255;
+  --transcript-bg-dark: 36,36,42;
+  --transcript-bg: var(--transcript-bg-light);
+}
+body.dark {
+  --transcript-bg: var(--transcript-bg-dark);
+}
+body:not(.dark) {
+  --transcript-bg: var(--transcript-bg-light);
+}
+body.dark .bg-white, body.dark .bg-white\/70, body.dark .bg-white\/80, body.dark .bg-white\/90 {
+  background-color: #23272f !important;
+}
+body.dark .text-gray-700, body.dark .text-gray-500 {
+  color: #d1d5db !important;
+}
+body.dark .shadow-md, body.dark .shadow-lg, body.dark .shadow-2xl {
+  box-shadow: 0 2px 8px 0 rgba(0,0,0,0.7) !important;
+}
+body.dark input, body.dark textarea, body.dark select {
+  background: #23272f !important;
+  color: #f3f4f6 !important;
+  border-color: #444 !important;
+}
+body.dark .border-gray-200, body.dark .border-gray-300, body.dark .border-gray-400 {
+  border-color: #333 !important;
+}
+body.dark .rounded-xl, body.dark .rounded-lg {
+  background-color: #23272f !important;
+}
+body.dark .highlight {
+  background-color: #facc15 !important;
+  color: #23272f !important;
+}
+body.dark p {
+  color: #fff !important;
+}
