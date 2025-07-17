@@ -13,6 +13,9 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
   const nearbySubtitlesRef = useRef(null);
   const [highlightedTranscript, setHighlightedTranscript] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
+  const [formattedTranscript, setFormattedTranscript] = useState('');
+  const [speakerImage, setSpeakerImage] = useState(null);
+  const fileInputRef = useRef(null);
   
   // 计算中文字数 - 直接计算字符数
   const countChineseChars = (text) => {
@@ -25,14 +28,48 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
   // 加载并解析 SRT 文件
   useEffect(() => {
     if (srtFile) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const content = e.target.result;
-        const enhancedSubtitles = parseAndEnhanceSRT(content);
+      if (srtFile.file && srtFile.file instanceof Blob) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const content = e.target.result;
+          const enhancedSubtitles = parseAndEnhanceSRT(content);
+          
+          // 移除字幕中的逗号和句号，并计算正确的汉字字数
+          const processedSubtitles = enhancedSubtitles.map(sub => {
+            const cleanedText = sub.text.replace(/[,.]/g, '');
+            // 计算汉字字数
+            const charCount = countChineseChars(cleanedText);
+            
+            // 确保字符速率计算不会出现无穷大
+            const duration = Math.max(0.1, sub.end - sub.start); // 确保持续时间至少为0.1秒
+            const charRate = charCount / duration;
+            
+            return {
+              ...sub,
+              text: cleanedText,
+              words: charCount, // 使用汉字字数
+              charRate: charRate.toFixed(2)
+            };
+          });
+          
+          setSubtitles(processedSubtitles);
+          
+          // 使用修正后的字幕查找问题
+          const subtitleIssues = findSubtitleIssues(processedSubtitles);
+          setIssues(subtitleIssues);
+          
+          // 如果有字幕和文字稿，处理文字稿格式
+          if (processedSubtitles.length > 0 && transcript) {
+            formatTranscriptWithTimestamps(transcript, processedSubtitles);
+          }
+        };
+        reader.readAsText(srtFile.file);
+      } else if (srtFile.content) {
+        const enhancedSubtitles = parseAndEnhanceSRT(srtFile.content);
         
         // 移除字幕中的逗号和句号，并计算正确的汉字字数
         const processedSubtitles = enhancedSubtitles.map(sub => {
-          const cleanedText = sub.text.replace(/[,\.]/g, '');
+          const cleanedText = sub.text.replace(/[,.]/g, '');
           // 计算汉字字数
           const charCount = countChineseChars(cleanedText);
           
@@ -53,22 +90,90 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
         // 使用修正后的字幕查找问题
         const subtitleIssues = findSubtitleIssues(processedSubtitles);
         setIssues(subtitleIssues);
-      };
-      reader.readAsText(srtFile);
+        
+        // 如果有字幕和文字稿，处理文字稿格式
+        if (processedSubtitles.length > 0 && transcript) {
+          formatTranscriptWithTimestamps(transcript, processedSubtitles);
+        }
+      }
     }
-  }, [srtFile]);
+  }, [srtFile, transcript]);
+  
+  // 格式化文字稿，添加时间戳
+  const formatTranscriptWithTimestamps = (text, subs) => {
+    if (!text || !subs || subs.length === 0) return text;
+    
+    // 获取字幕的时间范围
+    const startTime = subs[0].start;
+    const endTime = subs[subs.length - 1].end;
+    
+    // 创建每分钟的时间标记
+    const timeMarkers = [];
+    for (let time = Math.floor(startTime / 60) * 60; time <= endTime; time += 60) {
+      // 找到最接近这个时间点的字幕
+      const nearestSub = subs.reduce((prev, curr) => {
+        return Math.abs(curr.start - time) < Math.abs(prev.start - time) ? curr : prev;
+      }, subs[0]);
+      
+      // 将时间格式化为 MM:SS
+      const minutes = Math.floor(time / 60);
+      const seconds = Math.floor(time % 60);
+      const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+      
+      timeMarkers.push({
+        time,
+        formattedTime,
+        text: nearestSub.text.substring(0, 20) + '...' // 取字幕前20个字符
+      });
+    }
+    
+    // 将文字稿分段，并在每段之间添加时间标记
+    const paragraphs = text.split(/\n\s*\n/);
+    const paragraphsPerMarker = Math.ceil(paragraphs.length / (timeMarkers.length || 1));
+    
+    let formattedText = '';
+    paragraphs.forEach((para, index) => {
+      // 每隔一定段落添加时间标记
+      if (index > 0 && index % paragraphsPerMarker === 0) {
+        const markerIndex = Math.floor(index / paragraphsPerMarker) - 1;
+        if (markerIndex < timeMarkers.length) {
+          const marker = timeMarkers[markerIndex];
+          formattedText += `\n\n**[${marker.formattedTime}]** *${marker.text}*\n\n`;
+        }
+      }
+      formattedText += para + '\n\n';
+    });
+    
+    setFormattedTranscript(formattedText);
+  };
   
   // 加载文字稿
   useEffect(() => {
     if (txtFile) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setTranscript(e.target.result);
-        setHighlightedTranscript(e.target.result);
-      };
-      reader.readAsText(txtFile);
+      if (txtFile.file && txtFile.file instanceof Blob) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const text = e.target.result;
+          setTranscript(text);
+          setHighlightedTranscript(text);
+          
+          // 如果已经有字幕数据，处理文字稿格式
+          if (subtitles.length > 0) {
+            formatTranscriptWithTimestamps(text, subtitles);
+          }
+        };
+        reader.readAsText(txtFile.file);
+      } else if (txtFile.content) {
+        setTranscript(txtFile.content);
+        setHighlightedTranscript(txtFile.content);
+        
+        // 如果已经有字幕数据，处理文字稿格式
+        if (subtitles.length > 0) {
+          formatTranscriptWithTimestamps(txtFile.content, subtitles);
+        }
+      }
     }
-  }, [txtFile]);
+  }, [txtFile, subtitles]);
   
   // 根据当前时间更新活跃字幕
   useEffect(() => {
@@ -82,7 +187,7 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
       // 如果找到活跃字幕，在文字稿中高亮显示
       if (active && transcript) {
         const textToHighlight = active.text;
-        const highlighted = highlightText(transcript, textToHighlight);
+        const highlighted = highlightText(formattedTranscript || transcript, textToHighlight);
         setHighlightedTranscript(highlighted);
         
         // 滚动到高亮位置
@@ -106,7 +211,7 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
         }, 100);
       }
     }
-  }, [currentTime, subtitles, transcript, autoScroll]);
+  }, [currentTime, subtitles, transcript, formattedTranscript, autoScroll]);
   
   // 在文字稿中高亮显示当前字幕文本
   const highlightText = (fullText, textToHighlight) => {
@@ -131,13 +236,13 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
   // 复制当前字幕到剪贴板
   const copyCurrentSubtitle = () => {
     if (activeSubtitle) {
-      navigator.clipboard.writeText(activeSubtitle.text)
-        .then(() => {
-          alert('已复制到剪贴板');
-        })
-        .catch(err => {
-          console.error('复制失败:', err);
-        });
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(activeSubtitle.text)
+          .then(() => alert('已复制到剪贴板'))
+          .catch(err => alert('复制失败，请手动选择文本'));
+      } else {
+        alert('当前环境不支持一键复制，请手动选择文本');
+      }
     }
   };
   
@@ -181,8 +286,50 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
     return issue.message;
   };
   
+  // 处理演讲者图片上传
+  const handleSpeakerImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (file && file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setSpeakerImage(event.target.result);
+        
+        // 保存到本地存储，以便页面刷新后保留
+        try {
+          localStorage.setItem('speakerImage', event.target.result);
+        } catch (err) {
+          console.warn('无法保存图片到本地存储:', err);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+  
+  // 触发文件选择对话框
+  const triggerFileInput = () => {
+    fileInputRef.current.click();
+  };
+  
+  // 移除演讲者图片
+  const removeSpeakerImage = () => {
+    setSpeakerImage(null);
+    localStorage.removeItem('speakerImage');
+  };
+  
+  // 从本地存储加载演讲者图片
+  useEffect(() => {
+    try {
+      const savedImage = localStorage.getItem('speakerImage');
+      if (savedImage) {
+        setSpeakerImage(savedImage);
+      }
+    } catch (err) {
+      console.warn('无法从本地存储加载图片:', err);
+    }
+  }, []);
+  
   return (
-    <div className="space-y-6">
+    <div className="relative">
       <div className="flex flex-wrap gap-2 items-center">
         <button 
           onClick={copyCurrentSubtitle} 
@@ -217,6 +364,39 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
         >
           {autoScroll ? '自动滚动: 开' : '自动滚动: 关'}
         </button>
+        
+        {/* 添加演讲者图片上传按钮 */}
+        <button
+          onClick={triggerFileInput}
+          className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+        >
+          <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
+          </svg>
+          {speakerImage ? '更换立绘' : '上传立绘'}
+        </button>
+        
+        {/* 隐藏的文件输入 */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleSpeakerImageUpload}
+        />
+        
+        {/* 如果有图片，显示删除按钮 */}
+        {speakerImage && (
+          <button
+            onClick={removeSpeakerImage}
+            className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+          >
+            <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+            删除立绘
+          </button>
+        )}
         
         <div className="inline-flex items-center rounded-md shadow-sm ml-auto">
           <button 
@@ -270,7 +450,31 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
         </div>
       )}
       
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* 修改布局，添加演讲者图片区域 */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* 演讲者立绘区域 */}
+        <div className="bg-white rounded-xl shadow-md p-6 transition-shadow hover:shadow-lg flex flex-col items-center justify-center speaker-portrait-container">
+          {speakerImage ? (
+            <div className="relative w-full h-full flex items-center justify-center">
+              <img 
+                src={speakerImage} 
+                alt="演讲者立绘" 
+                className="max-h-[400px] max-w-full object-contain speaker-portrait"
+              />
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-gray-400">
+              <svg className="w-24 h-24 mb-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+              </svg>
+              <p className="text-center">
+                点击上方"上传立绘"按钮<br/>添加演讲者图片
+              </p>
+            </div>
+          )}
+        </div>
+        
+        {/* 当前字幕区域 */}
         <div className="bg-white rounded-xl shadow-md p-6 transition-shadow hover:shadow-lg">
           <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">当前字幕</h3>
           <p 
@@ -287,16 +491,17 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
           )}
         </div>
         
+        {/* 完整文字稿区域 */}
         <div className="bg-white rounded-xl shadow-md p-6 transition-shadow hover:shadow-lg">
           <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">完整文字稿</h3>
           <div 
             ref={transcriptRef}
-            className="p-4 bg-gray-50 rounded-md max-h-[300px] overflow-y-auto text-gray-800"
+            className="p-4 bg-gray-50 rounded-md max-h-[300px] overflow-y-auto text-gray-800 transcript-content"
             style={{ fontSize: `${fontSize}px` }}
           >
             {/* 使用 ReactMarkdown 渲染 Markdown 格式的文本 */}
             <ReactMarkdown>
-              {transcript}
+              {formattedTranscript || transcript}
             </ReactMarkdown>
             
             {/* 保留高亮功能的隐藏元素 */}
@@ -381,6 +586,18 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
         </div>
       </div>
       
+      {/* 字幕显示区域，固定底部居中，半透明背景 */}
+      <div className="fixed left-1/2 bottom-12 z-30 w-full max-w-3xl px-4" style={{ transform: 'translateX(-50%)' }}>
+        <div className="bg-black/60 rounded-lg py-3 px-6 text-white text-xl text-center shadow-lg select-text">
+          {/* 高亮字幕内容 */}
+          {activeSubtitle ? (
+            <span dangerouslySetInnerHTML={{ __html: activeSubtitle.text }} />
+          ) : (
+            <span className="text-gray-300">（等待音频播放...）</span>
+          )}
+        </div>
+      </div>
+      
       <style jsx global>{`
         .highlight {
           background-color: #fef08a;
@@ -433,6 +650,51 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
         
         .future-subtitle {
           opacity: 0.9;
+        }
+        
+        /* 增加文字稿的行间距和段落间距 */
+        .transcript-content {
+          line-height: 1.8;
+        }
+        
+        .transcript-content p {
+          margin-bottom: 1.2em;
+        }
+        
+        /* 时间标记样式 */
+        .transcript-content strong {
+          color: #2563eb;
+        }
+        
+        .transcript-content em {
+          color: #4b5563;
+          font-style: italic;
+        }
+        
+        /* 演讲者立绘容器样式 */
+        .speaker-portrait-container {
+          min-height: 400px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background-color: #f9fafb;
+          overflow: hidden;
+        }
+        
+        /* 演讲者立绘样式 */
+        .speaker-portrait {
+          transition: transform 0.3s ease;
+        }
+        
+        .speaker-portrait:hover {
+          transform: scale(1.02);
+        }
+        
+        /* 响应式布局调整 */
+        @media (max-width: 1023px) {
+          .speaker-portrait-container {
+            min-height: 300px;
+          }
         }
       `}</style>
     </div>

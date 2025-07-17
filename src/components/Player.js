@@ -15,6 +15,8 @@ const Player = ({ audioFile, srtFile, txtFile }) => {
     if (audioElement) {
       audioElement.currentTime = time;
     }
+    // 对于Android端，需要通知AudioPlayer组件
+    // 这里可以通过ref或其他方式调用AudioPlayer的seekToTime方法
   };
   
   return (

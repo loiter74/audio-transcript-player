@@ -29,3 +29,19 @@
   border-radius: 3px;
   box-shadow: 0 0 0 2px rgba(254, 240, 138, 0.5);
 }
+
+/* 在 index.css 中添加 */
+@media (max-width: 768px) {
+  .grid-cols-3 {
+    grid-template-columns: 1fr;
+  }
+  
+  .speaker-portrait-container {
+    max-height: 250px;
+  }
+  
+  /* 调整字体大小 */
+  body {
+    font-size: 14px;
+  }
+}
