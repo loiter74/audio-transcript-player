@@ -22,6 +22,22 @@ const FileUploader = ({ onFilesUploaded }) => {
     setDebugLog(prev => prev + logMessage + '\n');
   };
 
+  // 工具函数：base64转blob
+  function b64toBlob(b64Data, contentType = '', sliceSize = 512) {
+    const byteCharacters = atob(b64Data);
+    const byteArrays = [];
+    for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+      const slice = byteCharacters.slice(offset, offset + sliceSize);
+      const byteNumbers = new Array(slice.length);
+      for (let i = 0; i < slice.length; i++) {
+        byteNumbers[i] = slice.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      byteArrays.push(byteArray);
+    }
+    return new Blob(byteArrays, { type: contentType });
+  }
+
   const handleFileSelect = async (fileType) => {
     try {
       setError('');
@@ -83,16 +99,58 @@ const FileUploader = ({ onFilesUploaded }) => {
         addDebugLog('文件data字段存在，开始构建文件对象');
 
         // 构建文件对象，包含所有必要信息
+        // 修正：根据扩展名推断mimeType，兜底audio/mpeg
+        const extToMime = {
+          '.mp3': 'audio/mpeg',
+          '.wav': 'audio/wav',
+          '.m4a': 'audio/mp4',
+          '.aac': 'audio/aac',
+          '.ogg': 'audio/ogg',
+          '.flac': 'audio/flac'
+        };
+        const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+        const mimeType = file.mimeType || file.type || extToMime[fileExtension] || 'audio/mpeg';
+
+        let webPath = '';
+        // 安卓端：写入临时文件，生成file://路径
+        if (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() === 'android' && file.data) {
+          try {
+            const fileName = `audio_${Date.now()}${fileExtension}`;
+            const writeRes = await Filesystem.writeFile({
+              path: fileName,
+              data: file.data,
+              directory: Directory.Cache,
+              recursive: true
+            });
+            // 转换为file://路径
+            webPath = window.Capacitor.convertFileSrc(writeRes.uri);
+            addDebugLog('安卓写入临时文件 fileUrl: ' + webPath);
+          } catch (err) {
+            addDebugLog('安卓写入临时文件失败: ' + err.message);
+            // 兜底用data URL
+            webPath = `data:${mimeType};base64,${file.data}`;
+          }
+        } else if (file.data) {
+          // Web端/桌面端优先用blob URL
+          try {
+            const blob = b64toBlob(file.data, mimeType);
+            webPath = URL.createObjectURL(blob);
+          } catch (blobErr) {
+            webPath = `data:${mimeType};base64,${file.data}`;
+          }
+        } else if (file.webPath) {
+          webPath = file.webPath;
+        }
+
         const fileObj = {
           name: file.name,
-          type: file.mimeType,
+          type: mimeType, // 修正后的type
           size: file.size,
           data: file.data,
           path: file.path, // 添加路径信息
-          webPath: file.webPath // 添加webPath信息
+          webPath // 统一webPath
         };
-        
-        addDebugLog(`构建的文件对象: name=${fileObj.name}, type=${fileObj.type}, size=${fileObj.size}`);
+        addDebugLog(`构建的文件对象: name=${fileObj.name}, type=${fileObj.type}, size=${fileObj.size}, webPath=${fileObj.webPath}`);
         
         // 基本验证（不进行复杂的音频测试）
         if (fileType === 'audio') {
@@ -173,85 +231,47 @@ const FileUploader = ({ onFilesUploaded }) => {
     }
   };
 
-  const handleFileInput = (e, fileType) => {
+  const handleFileInput = async (e, fileType) => {
     const file = e.target.files[0];
-    if (!file) {
-      addDebugLog('Web文件选择: 没有选择文件');
-      return;
+    if (!file) return;
+
+    let webPath = '';
+    let base64 = '';
+
+    // 安卓端 content:// 路径处理
+    if (file.path && file.path.startsWith('content://')) {
+      try {
+        const result = await Filesystem.readFile({ path: file.path });
+        base64 = result.data;
+        // 优先用blob URL
+        try {
+          const blob = b64toBlob(base64, file.type || 'audio/mpeg');
+          webPath = URL.createObjectURL(blob);
+          console.log('安卓 content:// 处理后 blob webPath:', webPath);
+        } catch (blobErr) {
+          // fallback到data URL
+          webPath = `data:${file.type || 'audio/mpeg'};base64,${base64}`;
+          console.log('安卓 content:// 处理后 fallback dataURL webPath:', webPath.slice(0, 100));
+        }
+      } catch (err) {
+        alert('安卓端音频文件读取失败，请尝试重新选择或更换文件');
+        return;
+      }
+    } else {
+      // 其他情况用 blob URL
+      webPath = URL.createObjectURL(file);
+      console.log('普通文件 webPath:', webPath);
     }
-    
-    addDebugLog(`Web文件选择: ${file.name}, 大小: ${file.size}字节`);
-    debugFileInfo(file, `Web选择的${fileType}文件`);
-    
-    const fileObj = {
+
+    setAudioFile({
       name: file.name,
       type: file.type,
       size: file.size,
-      webPath: URL.createObjectURL(file),
-      file: file
-    };
-    
-    addDebugLog(`Web构建的文件对象: name=${fileObj.name}, type=${fileObj.type}, size=${fileObj.size}`);
-    
-    // 基本验证
-    if (fileType === 'audio') {
-      addDebugLog('Web音频文件验证开始...');
-      
-      // 检查文件扩展名
-      const validExtensions = ['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac'];
-      const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
-      addDebugLog(`Web音频扩展名: ${fileExtension}`);
-      
-      if (!validExtensions.includes(fileExtension)) {
-        addDebugLog(`Web错误: 不支持的音频格式: ${fileExtension}`);
-        setError(`不支持的音频格式: ${fileExtension}`);
-        return;
-      }
-      
-      // 检查文件大小
-      if (file.size === 0) {
-        addDebugLog('Web错误: 文件大小为0，文件可能损坏');
-        setError('文件大小为0，文件可能损坏');
-        return;
-      }
-      
-      if (file.size < 1024) {
-        addDebugLog('Web错误: 文件太小，可能不是有效的音频文件');
-        setError('文件太小，可能不是有效的音频文件');
-        return;
-      }
-      
-      addDebugLog('Web音频文件验证通过，调用setAudioFile');
-      setAudioFile(fileObj);
-      addDebugLog('Web音频文件设置成功');
-    } else {
-      // 对于其他文件类型，使用原有的验证
-      addDebugLog('Web其他文件类型验证开始...');
-      const validationErrors = validateFile(fileObj, fileType);
-      if (validationErrors.length > 0) {
-        addDebugLog(`Web错误: 文件验证失败: ${validationErrors.join(', ')}`);
-        setError(`文件验证失败: ${validationErrors.join(', ')}`);
-        return;
-      }
-      
-      addDebugLog('Web其他文件类型验证通过');
-      switch (fileType) {
-        case 'srt': 
-          addDebugLog('Web调用setSrtFile');
-          setSrtFile(fileObj); 
-          addDebugLog('Web字幕文件设置成功');
-          break;
-        case 'txt': 
-          addDebugLog('Web调用setTxtFile');
-          setTxtFile(fileObj); 
-          addDebugLog('Web文字稿文件设置成功');
-          break;
-        default:
-          addDebugLog(`Web警告: 未知的文件类型: ${fileType}`);
-          console.warn('Web未知的文件类型:', fileType);
-          break;
-      }
-    }
+      webPath,
+      file,
+      base64,
+      path: file.path,
+    });
   };
 
   const readFileContent = async (fileObj) => {

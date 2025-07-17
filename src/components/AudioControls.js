@@ -1,17 +1,77 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
+
+const isAndroid = /Android/i.test(navigator.userAgent);
 
 const AudioControls = ({ audioFile, currentTime, setCurrentTime, isPlaying, setIsPlaying, duration, setDuration, onActiveParagraphChange }) => {
   const audioRef = useRef(null);
+  const [triedUnmuted, setTriedUnmuted] = useState(false);
 
-  // 播放/暂停控制
-  const togglePlayPause = () => {
+  // 播放/暂停控制，安卓端首次播放时muted
+  const togglePlayPause = (e) => {
     if (!audioRef.current) return;
-    if (audioRef.current.paused) {
-      audioRef.current.play();
-      setIsPlaying(true);
-    } else {
-      audioRef.current.pause();
-      setIsPlaying(false);
+    console.log('[AudioControls] 播放按钮点击，audio状态:', {
+      src: audioRef.current.src,
+      paused: audioRef.current.paused,
+      muted: audioRef.current.muted,
+      currentTime: audioRef.current.currentTime,
+      readyState: audioRef.current.readyState,
+      error: audioRef.current.error
+    });
+    try {
+      if (isAndroid && !triedUnmuted) {
+        console.log('[AudioControls] 安卓端首次播放，尝试muted=true后play()');
+        audioRef.current.muted = true;
+        audioRef.current.play().then(() => {
+          audioRef.current.muted = false;
+          setTriedUnmuted(true);
+          setIsPlaying(true);
+          console.log('[AudioControls] 安卓端首次play()成功，已unmuted', {
+            src: audioRef.current.src,
+            paused: audioRef.current.paused,
+            muted: audioRef.current.muted,
+            currentTime: audioRef.current.currentTime,
+            readyState: audioRef.current.readyState,
+            error: audioRef.current.error
+          });
+        }).catch((err) => {
+          console.error('[AudioControls] 安卓端首次play()失败', err, {
+            src: audioRef.current.src,
+            paused: audioRef.current.paused,
+            muted: audioRef.current.muted,
+            currentTime: audioRef.current.currentTime,
+            readyState: audioRef.current.readyState,
+            error: audioRef.current.error
+          });
+          alert('如未能自动播放，请再次点击播放按钮或尝试刷新页面。');
+        });
+        return;
+      }
+      if (audioRef.current.paused) {
+        audioRef.current.play();
+        setIsPlaying(true);
+        console.log('[AudioControls] play() called, now playing', {
+          src: audioRef.current.src,
+          paused: audioRef.current.paused,
+          muted: audioRef.current.muted,
+          currentTime: audioRef.current.currentTime,
+          readyState: audioRef.current.readyState,
+          error: audioRef.current.error
+        });
+      } else {
+        audioRef.current.pause();
+        setIsPlaying(false);
+        console.log('[AudioControls] pause() called, now paused', {
+          src: audioRef.current.src,
+          paused: audioRef.current.paused,
+          muted: audioRef.current.muted,
+          currentTime: audioRef.current.currentTime,
+          readyState: audioRef.current.readyState,
+          error: audioRef.current.error
+        });
+      }
+    } catch (err) {
+      console.error('play/pause异常', err);
+      alert('如未能自动播放，请再次点击播放按钮或尝试刷新页面。');
     }
   };
 
@@ -21,9 +81,11 @@ const AudioControls = ({ audioFile, currentTime, setCurrentTime, isPlaying, setI
     if (onActiveParagraphChange) {
       onActiveParagraphChange(e.target.currentTime);
     }
+    console.log('audio timeupdate:', e.target.currentTime);
   };
   const handleLoadedMetadata = (e) => {
     setDuration(e.target.duration || 0);
+    console.log('audio loadedmetadata, duration:', e.target.duration);
   };
   // 进度条跳转
   const handleProgressClick = (e) => {
@@ -48,7 +110,7 @@ const AudioControls = ({ audioFile, currentTime, setCurrentTime, isPlaying, setI
   useEffect(() => {
     if (!audioRef.current) return;
     if (isPlaying) {
-      audioRef.current.play();
+      audioRef.current.play().catch(() => {});
     } else {
       audioRef.current.pause();
     }
@@ -59,6 +121,7 @@ const AudioControls = ({ audioFile, currentTime, setCurrentTime, isPlaying, setI
       <div className="flex items-center gap-4 mb-2 w-full">
         <button
           onClick={togglePlayPause}
+          onTouchEnd={isAndroid ? togglePlayPause : undefined}
           disabled={!audioFile}
           className={`w-14 h-14 flex items-center justify-center text-white rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${audioFile ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'}`}
           type="button"
@@ -75,11 +138,42 @@ const AudioControls = ({ audioFile, currentTime, setCurrentTime, isPlaying, setI
         </button>
         <audio
           ref={audioRef}
-          src={audioFile?.webPath || audioFile?.path || (audioFile?.file ? URL.createObjectURL(audioFile.file) : '')}
+          src={audioFile?.webPath || (audioFile?.file ? URL.createObjectURL(audioFile.file) : '')}
           type={audioFile?.type || 'audio/mpeg'}
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           controls={false}
+          playsInline
+          onPlay={() => {
+            console.log('[AudioControls] audio onPlay', {
+              src: audioRef.current?.src,
+              paused: audioRef.current?.paused,
+              muted: audioRef.current?.muted,
+              currentTime: audioRef.current?.currentTime,
+              readyState: audioRef.current?.readyState,
+              error: audioRef.current?.error
+            });
+          }}
+          onPause={() => {
+            console.log('[AudioControls] audio onPause', {
+              src: audioRef.current?.src,
+              paused: audioRef.current?.paused,
+              muted: audioRef.current?.muted,
+              currentTime: audioRef.current?.currentTime,
+              readyState: audioRef.current?.readyState,
+              error: audioRef.current?.error
+            });
+          }}
+          onError={e => {
+            console.error('[AudioControls] audio onError', e, {
+              src: audioRef.current?.src,
+              paused: audioRef.current?.paused,
+              muted: audioRef.current?.muted,
+              currentTime: audioRef.current?.currentTime,
+              readyState: audioRef.current?.readyState,
+              error: audioRef.current?.error
+            });
+          }}
         />
         <div className="flex flex-col items-center w-full flex-1">
           <div className="flex items-center justify-between w-full text-xs text-gray-500 mb-1">
