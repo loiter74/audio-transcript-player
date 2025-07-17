@@ -326,7 +326,8 @@ const FileUploader = ({ onFilesUploaded }) => {
           txt: {
             ...txtFile,
             content: txtContent
-          }
+          },
+          debugLog
         });
         addDebugLog('onFilesUploaded调用完成');
       } catch (error) {
@@ -347,7 +348,7 @@ const FileUploader = ({ onFilesUploaded }) => {
   const isFormValid = audioFile && srtFile && txtFile;
 
   return (
-    <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-md overflow-hidden p-6 transition-shadow hover:shadow-lg">
+    <div className="bg-white/70 rounded-xl shadow-md p-6 mb-6">
       <h2 className="text-2xl font-bold text-center text-blue-600 mb-2">上传文件</h2>
       <p className="text-gray-500 text-center mb-6">
         上传音频文件、字幕文件和文字稿，开始同步播放和高亮显示
@@ -359,19 +360,7 @@ const FileUploader = ({ onFilesUploaded }) => {
         </div>
       )}
       
-      {/* 调试日志面板 */}
-      <div className="mb-4 p-3 bg-gray-100 border border-gray-300 rounded">
-        <h3 className="text-sm font-medium text-gray-700 mb-2">调试日志:</h3>
-        <pre className="text-xs text-gray-600 max-h-32 overflow-y-auto whitespace-pre-wrap">
-          {debugLog || '暂无日志...'}
-        </pre>
-        <button 
-          onClick={() => setDebugLog('')}
-          className="mt-2 px-2 py-1 text-xs bg-gray-300 hover:bg-gray-400 rounded"
-        >
-          清空日志
-        </button>
-      </div>
+      {/* 调试日志面板已移除 */}
       
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>

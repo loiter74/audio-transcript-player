@@ -235,7 +235,7 @@ const AudioPlayer = ({ audioFile, onTimeUpdate }) => {
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-md p-6 transition-shadow hover:shadow-lg">
+    <div className="bg-white/70 rounded-xl shadow-md p-6 mb-6">
       <h2 className="text-xl font-semibold text-gray-800 mb-4">音频播放器</h2>
       {error && (
         <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">

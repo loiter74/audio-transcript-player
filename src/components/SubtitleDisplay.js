@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { parseAndEnhanceSRT, findSubtitleIssues } from '../utils/enhancedSrtParser';
 import ReactMarkdown from 'react-markdown';
+import BgImageUploader from './BgImageUploader';
 
-const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
+const SubtitleDisplay = ({ audioFile, srtFile, txtFile, currentTime, setCurrentTime, bgImage, bgOpacity, onBgImageChange, onOpacityChange, debugLog, setHighlightIndex }) => {
   const [subtitles, setSubtitles] = useState([]);
   const [transcript, setTranscript] = useState('');
   const [activeSubtitle, setActiveSubtitle] = useState(null);
@@ -12,11 +13,72 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
   const transcriptRef = useRef(null);
   const nearbySubtitlesRef = useRef(null);
   const [highlightedTranscript, setHighlightedTranscript] = useState('');
-  const [autoScroll, setAutoScroll] = useState(true);
   const [formattedTranscript, setFormattedTranscript] = useState('');
-  const [speakerImage, setSpeakerImage] = useState(null);
-  const fileInputRef = useRef(null);
-  
+  const [showFloat, setShowFloat] = useState(true);
+  const [floatPos, setFloatPos] = useState({ x: 100, y: 100 });
+  const floatRef = useRef();
+  const dragOffset = useRef({ x: 0, y: 0 });
+  const dragging = useRef(false);
+  const [pinned, setPinned] = useState(false); // 图钉状态
+  const audioRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+
+  // 拖动事件
+  const onMouseDown = (e) => {
+    if (pinned) return; // 图钉状态下不可拖动
+    dragging.current = true;
+    dragOffset.current = {
+      x: e.clientX - floatPos.x,
+      y: e.clientY - floatPos.y
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+  const onMouseMove = (e) => {
+    if (!dragging.current) return;
+    setFloatPos({ x: e.clientX - dragOffset.current.x, y: e.clientY - dragOffset.current.y });
+  };
+  const onMouseUp = () => {
+    dragging.current = false;
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+  };
+
+  // 播放/暂停控制
+  const togglePlayPause = (e) => {
+    e && e.stopPropagation && e.stopPropagation();
+    if (!audioRef.current) return;
+    if (audioRef.current.paused) {
+      audioRef.current.play();
+      setIsPlaying(true);
+    } else {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    }
+  };
+  // 音频进度同步
+  const handleTimeUpdate = (e) => {
+    setCurrentTime(e.target.currentTime);
+  };
+
+  // 进度条跳转
+  const handleProgressClick = (e) => {
+    if (!audioRef.current || duration === 0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const percent = (clientX - rect.left) / rect.width;
+    const seekTime = percent * duration;
+    audioRef.current.currentTime = seekTime;
+    setCurrentTime(seekTime);
+  };
+  // 时间格式化
+  const formatTime = (time) => {
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
+
   // 计算中文字数 - 直接计算字符数
   const countChineseChars = (text) => {
     if (!text) return 0;
@@ -193,7 +255,7 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
         // 滚动到高亮位置
         setTimeout(() => {
           const highlightElement = transcriptRef.current?.querySelector('.highlight');
-          if (highlightElement && autoScroll) {
+          if (highlightElement) {
             highlightElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }
         }, 100);
@@ -201,7 +263,7 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
         // 滚动附近字幕区域，确保当前字幕在视图中，但不强制移动页面
         setTimeout(() => {
           const activeElement = nearbySubtitlesRef.current?.querySelector('.active-subtitle');
-          if (activeElement && autoScroll) {
+          if (activeElement) {
             activeElement.scrollIntoView({ 
               behavior: 'smooth', 
               block: 'nearest', 
@@ -211,7 +273,7 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
         }, 100);
       }
     }
-  }, [currentTime, subtitles, transcript, formattedTranscript, autoScroll]);
+  }, [currentTime, subtitles, transcript, formattedTranscript]);
   
   // 在文字稿中高亮显示当前字幕文本
   const highlightText = (fullText, textToHighlight) => {
@@ -243,13 +305,6 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
       } else {
         alert('当前环境不支持一键复制，请手动选择文本');
       }
-    }
-  };
-  
-  // 跳转到指定字幕
-  const jumpToSubtitle = (subtitle) => {
-    if (onSeek && subtitle) {
-      onSeek(subtitle.start);
     }
   };
   
@@ -285,420 +340,119 @@ const SubtitleDisplay = ({ srtFile, txtFile, currentTime, onSeek }) => {
     }
     return issue.message;
   };
-  
-  // 处理演讲者图片上传
-  const handleSpeakerImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file && file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setSpeakerImage(event.target.result);
-        
-        // 保存到本地存储，以便页面刷新后保留
-        try {
-          localStorage.setItem('speakerImage', event.target.result);
-        } catch (err) {
-          console.warn('无法保存图片到本地存储:', err);
-        }
-      };
-      reader.readAsDataURL(file);
+
+  // 通过props传递高亮正文索引
+  const handleSubtitleClick = () => {
+    if (!activeSubtitle || !txtFile || !setHighlightIndex) return;
+    const paragraphs = (txtFile.content || transcript || '').split(/\n\s*\n/);
+    const idx = paragraphs.findIndex(p => p.includes(activeSubtitle.text.trim()));
+    if (idx !== -1) {
+      setHighlightIndex(idx);
     }
   };
-  
-  // 触发文件选择对话框
-  const triggerFileInput = () => {
-    fileInputRef.current.click();
-  };
-  
-  // 移除演讲者图片
-  const removeSpeakerImage = () => {
-    setSpeakerImage(null);
-    localStorage.removeItem('speakerImage');
-  };
-  
-  // 从本地存储加载演讲者图片
-  useEffect(() => {
-    try {
-      const savedImage = localStorage.getItem('speakerImage');
-      if (savedImage) {
-        setSpeakerImage(savedImage);
-      }
-    } catch (err) {
-      console.warn('无法从本地存储加载图片:', err);
-    }
-  }, []);
   
   return (
-    <div className="relative">
-      <div className="flex flex-wrap gap-2 items-center">
-        <button 
-          onClick={copyCurrentSubtitle} 
-          disabled={!activeSubtitle}
-          className={`inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
-            activeSubtitle 
-              ? 'text-white bg-blue-600 hover:bg-blue-700' 
-              : 'text-gray-400 bg-gray-200 cursor-not-allowed'
-          }`}
+    <>
+      {showFloat && (
+        <div
+          ref={floatRef}
+          style={{ position: 'fixed', left: floatPos.x, top: floatPos.y, zIndex: 10000, minWidth: 320, maxWidth: 600, cursor: pinned ? 'default' : 'move', userSelect: 'none' }}
+          className="shadow-2xl bg-white/90 rounded-xl border border-gray-300"
+          onMouseDown={onMouseDown}
         >
-          <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-            <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
-            <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
-          </svg>
-          复制当前字幕
-        </button>
-        
-        <button 
-          onClick={() => setShowIssues(!showIssues)}
-          className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md shadow-sm text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"
-        >
-          {issues.length > 0 ? `查看问题 (${issues.length})` : '无字幕问题'}
-        </button>
-        
-        <button
-          onClick={() => setAutoScroll(!autoScroll)}
-          className={`inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
-            autoScroll
-              ? 'text-white bg-green-600 hover:bg-green-700'
-              : 'text-white bg-gray-500 hover:bg-gray-600'
-          }`}
-        >
-          {autoScroll ? '自动滚动: 开' : '自动滚动: 关'}
-        </button>
-        
-        {/* 添加演讲者图片上传按钮 */}
-        <button
-          onClick={triggerFileInput}
-          className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-        >
-          <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
-          </svg>
-          {speakerImage ? '更换立绘' : '上传立绘'}
-        </button>
-        
-        {/* 隐藏的文件输入 */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={handleSpeakerImageUpload}
-        />
-        
-        {/* 如果有图片，显示删除按钮 */}
-        {speakerImage && (
-          <button
-            onClick={removeSpeakerImage}
-            className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-          >
-            <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-            </svg>
-            删除立绘
-          </button>
-        )}
-        
-        <div className="inline-flex items-center rounded-md shadow-sm ml-auto">
-          <button 
-            onClick={decreaseFontSize} 
-            title="减小字体"
-            className="inline-flex items-center px-2 py-1 border border-gray-300 text-sm font-medium rounded-l-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-          >
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-            </svg>
-          </button>
-          <span className="inline-flex items-center px-3 py-1 border-t border-b border-gray-300 text-sm font-medium text-gray-700 bg-gray-50">
-            {fontSize}px
-          </span>
-          <button 
-            onClick={increaseFontSize} 
-            title="增大字体"
-            className="inline-flex items-center px-2 py-1 border border-gray-300 text-sm font-medium rounded-r-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-          >
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
-            </svg>
-          </button>
-        </div>
-      </div>
-      
-      {showIssues && issues.length > 0 && (
-        <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded-md">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <svg className="h-5 w-5 text-amber-400" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+          {/* 操作区：并排美化布局 */}
+          <div className="flex flex-wrap items-center gap-3 bg-white/70 rounded-t-xl p-3 border-b border-gray-200">
+            {/* 图钉按钮 */}
+            <button
+              onClick={e => { e.stopPropagation(); setPinned(v => !v); }}
+              className={`w-10 h-10 flex items-center justify-center rounded-full border-2 ${pinned ? 'bg-yellow-400 border-yellow-500' : 'bg-gray-200 border-gray-300'} shadow focus:outline-none mr-2`}
+              title={pinned ? '已固定，点击解锁拖动' : '未固定，点击固定悬浮窗'}
+              type="button"
+            >
+              {pinned ? (
+                <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M6.293 6.293a1 1 0 011.414 0L10 8.586l2.293-2.293a1 1 0 111.414 1.414L11.414 10l2.293 2.293a1 1 0 01-1.414 1.414L10 11.414l-2.293 2.293a1 1 0 01-1.414-1.414L8.586 10 6.293 7.707a1 1 0 010-1.414z" />
+                </svg>
+              ) : (
+                <svg className="w-6 h-6 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l.7 2.148a1 1 0 00.95.69h2.262c.969 0 1.371 1.24.588 1.81l-1.833 1.33a1 1 0 00-.364 1.118l.7 2.148c.3.921-.755 1.688-1.54 1.118l-1.833-1.33a1 1 0 00-1.175 0l-1.833 1.33c-.784.57-1.838-.197-1.54-1.118l.7-2.148a1 1 0 00-.364-1.118l-1.833-1.33c-.783-.57-.38-1.81.588-1.81h2.262a1 1 0 00.95-.69l.7-2.148z" />
+                </svg>
+              )}
+            </button>
+            {/* 复制当前字幕 */}
+            <button 
+              onClick={e => { e.stopPropagation(); copyCurrentSubtitle(); }} 
+              disabled={!activeSubtitle}
+              className={`inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 h-10 mt-5 ${
+                activeSubtitle 
+                  ? 'text-white bg-blue-600 hover:bg-blue-700' 
+                  : 'text-gray-400 bg-gray-200 cursor-not-allowed'
+              }`}
+            >
+              <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
+                <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
               </svg>
-            </div>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-amber-800">
-                字幕问题 ({issues.length})
-              </h3>
-              <div className="mt-2 text-sm text-amber-700">
-                <ul className="list-disc pl-5 space-y-1">
-                  {issues.slice(0, 5).map((issue, index) => (
-                    <li key={index}>{getIssueDetails(issue)}</li>
-                  ))}
-                  {issues.length > 5 && (
-                    <li>...还有 {issues.length - 5} 个问题</li>
-                  )}
-                </ul>
-              </div>
+              复制当前字幕
+            </button>
+          </div>
+          {/* 悬浮字幕内容 - 朴素风格 */}
+          <div className="py-6 px-4 text-center select-text">
+            <div
+              style={{
+                background: '#fff',
+                borderRadius: 10,
+                padding: 16,
+                fontWeight: 500,
+                fontSize: '1.5rem',
+                color: '#222',
+                border: '1px solid #e5e7eb',
+                boxShadow: '0 2px 8px 0 rgba(0,0,0,0.04)',
+                letterSpacing: 0.5,
+                lineHeight: 1.5,
+                cursor: activeSubtitle ? 'pointer' : 'default'
+              }}
+              onClick={handleSubtitleClick}
+              title={activeSubtitle ? '点击跳转到正文对应段落' : ''}
+            >
+              {activeSubtitle ? (
+                <span dangerouslySetInnerHTML={{ __html: activeSubtitle.text }} />
+              ) : (
+                <span className="text-gray-400">（等待音频播放...）</span>
+              )}
             </div>
           </div>
         </div>
       )}
       
-      {/* 修改布局，添加演讲者图片区域 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* 演讲者立绘区域 */}
-        <div className="bg-white rounded-xl shadow-md p-6 transition-shadow hover:shadow-lg flex flex-col items-center justify-center speaker-portrait-container">
-          {speakerImage ? (
-            <div className="relative w-full h-full flex items-center justify-center">
-              <img 
-                src={speakerImage} 
-                alt="演讲者立绘" 
-                className="max-h-[400px] max-w-full object-contain speaker-portrait"
-              />
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full text-gray-400">
-              <svg className="w-24 h-24 mb-4" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-              </svg>
-              <p className="text-center">
-                点击上方"上传立绘"按钮<br/>添加演讲者图片
-              </p>
-            </div>
-          )}
-        </div>
-        
-        {/* 当前字幕区域 */}
-        <div className="bg-white rounded-xl shadow-md p-6 transition-shadow hover:shadow-lg">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">当前字幕</h3>
-          <p 
-            className="p-4 bg-gray-50 rounded-md min-h-[100px] text-gray-800 subtitle-text"
-            style={{ fontSize: `${fontSize}px` }}
-          >
-            {activeSubtitle ? activeSubtitle.text : ''}
-          </p>
-          {activeSubtitle && (
-            <div className="mt-3 flex justify-between text-sm text-gray-500">
-              <span>时间: {activeSubtitle.formattedStart} - {activeSubtitle.formattedEnd}</span>
-              <span>字数: {activeSubtitle.words || 0} 字</span>
-            </div>
-          )}
-        </div>
-        
-        {/* 完整文字稿区域 */}
-        <div className="bg-white rounded-xl shadow-md p-6 transition-shadow hover:shadow-lg">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">完整文字稿</h3>
-          <div 
-            ref={transcriptRef}
-            className="p-4 bg-gray-50 rounded-md max-h-[300px] overflow-y-auto text-gray-800 transcript-content"
-            style={{ fontSize: `${fontSize}px` }}
-          >
-            {/* 使用 ReactMarkdown 渲染 Markdown 格式的文本 */}
-            <ReactMarkdown>
-              {formattedTranscript || transcript}
-            </ReactMarkdown>
-            
-            {/* 保留高亮功能的隐藏元素 */}
-            <div 
-              className="hidden"
-              dangerouslySetInnerHTML={{ __html: highlightedTranscript }} 
-            />
-          </div>
-        </div>
-      </div>
-      
-      {/* 修改后的附近字幕区域（采用时间轴样式） */}
-      <div className="bg-white rounded-xl shadow-md p-6 transition-shadow hover:shadow-lg">
-        <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">附近字幕</h3>
-        
-        {/* 字幕时间轴指示器 */}
-        <div className="relative mb-4">
-          <div className="h-2 bg-gray-200 rounded-full">
-            {subtitles.length > 0 && (
-              <div 
-                className="absolute h-2 bg-blue-500 rounded-full"
-                style={{ 
-                  left: '0', 
-                  width: `${(currentTime / subtitles[subtitles.length - 1].end) * 100}%`,
-                  transition: 'width 0.3s ease-in-out'
-                }}
-              />
-            )}
-          </div>
-        </div>
-        
-        {/* 字幕滚动区域 */}
-        <div 
-          ref={nearbySubtitlesRef}
-          className="flex overflow-x-auto pb-4 timeline-container"
-          style={{ scrollbarWidth: 'thin' }}
+      <div className="fixed top-4 right-4 z-50 flex items-center gap-2">
+        <BgImageUploader
+          bgOpacity={bgOpacity}
+          onBgImageChange={onBgImageChange}
+          onOpacityChange={onOpacityChange}
+        />
+        <button
+          className="px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 focus:outline-none"
+          onClick={() => setShowFloat(v => !v)}
         >
-          {nearbySubtitles.map((sub, index) => {
-            const isActive = activeSubtitle && activeSubtitle.start === sub.start;
-            const isPast = activeSubtitle && sub.end < activeSubtitle.start;
-            const isFuture = activeSubtitle && sub.start > activeSubtitle.end;
-            
-            let positionClass = '';
-            if (isPast) positionClass = 'past-subtitle';
-            if (isFuture) positionClass = 'future-subtitle';
-            
-            return (
-              <div 
-                key={index} 
-                onClick={() => jumpToSubtitle(sub)}
-                className={`flex-shrink-0 p-3 mx-1 rounded-md cursor-pointer transition-all ${positionClass} ${
-                  isActive 
-                    ? 'active-subtitle bg-blue-100 border-b-4 border-blue-500 min-w-[200px] transform scale-105'
-                    : 'bg-gray-50 hover:bg-blue-50 min-w-[180px]'
-                }`}
-              >
-                <div 
-                  className={`text-sm ${isActive ? 'text-blue-800 font-medium' : 'text-gray-800'}`}
-                  style={{ fontSize: `${Math.max(12, fontSize - 2)}px` }}
-                >
-                  {sub.text}
-                </div>
-                <div className={`text-xs mt-1 flex justify-between ${isActive ? 'text-blue-600' : 'text-gray-500'}`}>
-                  <span>{sub.formattedStart} - {sub.formattedEnd}</span>
-                  <span>{sub.words || 0}字</span>
-                </div>
-              </div>
-            );
-          })}
-          {nearbySubtitles.length === 0 && (
-            <p className="text-center py-4 text-gray-500 w-full">
-              没有可显示的字幕
-            </p>
-          )}
-        </div>
-        
-        {/* 导航提示 */}
-        <div className="flex justify-between text-xs text-gray-500 mt-2">
-          <span>← 前20条字幕</span>
-          <span>当前位置</span>
-          <span>后10条字幕 →</span>
-        </div>
-      </div>
-      
-      {/* 字幕显示区域，固定底部居中，半透明背景 */}
-      <div className="fixed left-1/2 bottom-12 z-30 w-full max-w-3xl px-4" style={{ transform: 'translateX(-50%)' }}>
-        <div className="bg-black/60 rounded-lg py-3 px-6 text-white text-xl text-center shadow-lg select-text">
-          {/* 高亮字幕内容 */}
-          {activeSubtitle ? (
-            <span dangerouslySetInnerHTML={{ __html: activeSubtitle.text }} />
-          ) : (
-            <span className="text-gray-300">（等待音频播放...）</span>
-          )}
-        </div>
+          {showFloat ? '隐藏悬浮字幕' : '显示悬浮字幕'}
+        </button>
       </div>
       
       <style jsx global>{`
-        .highlight {
-          background-color: #fef08a;
-          padding: 2px 0;
-          border-radius: 3px;
-          animation: pulse 1.5s infinite;
-        }
-        
-        @keyframes pulse {
-          0% {
-            box-shadow: 0 0 0 0 rgba(254, 240, 138, 0.7);
-          }
-          70% {
-            box-shadow: 0 0 0 6px rgba(254, 240, 138, 0);
-          }
-          100% {
-            box-shadow: 0 0 0 0 rgba(254, 240, 138, 0);
-          }
-        }
-        
-        .timeline-container {
-          scrollbar-width: thin;
-          scrollbar-color: #93c5fd #e5e7eb;
-          scroll-behavior: smooth;
-          padding: 8px 0;
-        }
-        
-        .timeline-container::-webkit-scrollbar {
-          height: 6px;
-        }
-        
-        .timeline-container::-webkit-scrollbar-track {
-          background: #e5e7eb;
-          border-radius: 3px;
-        }
-        
-        .timeline-container::-webkit-scrollbar-thumb {
-          background-color: #93c5fd;
-          border-radius: 3px;
-        }
-        
-        .active-subtitle {
-          box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
-          z-index: 10;
-        }
-        
-        .past-subtitle {
-          opacity: 0.8;
-        }
-        
-        .future-subtitle {
-          opacity: 0.9;
-        }
-        
-        /* 增加文字稿的行间距和段落间距 */
-        .transcript-content {
-          line-height: 1.8;
-        }
-        
-        .transcript-content p {
-          margin-bottom: 1.2em;
-        }
-        
-        /* 时间标记样式 */
-        .transcript-content strong {
-          color: #2563eb;
-        }
-        
-        .transcript-content em {
-          color: #4b5563;
-          font-style: italic;
-        }
-        
-        /* 演讲者立绘容器样式 */
-        .speaker-portrait-container {
-          min-height: 400px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background-color: #f9fafb;
-          overflow: hidden;
-        }
-        
-        /* 演讲者立绘样式 */
-        .speaker-portrait {
-          transition: transform 0.3s ease;
-        }
-        
-        .speaker-portrait:hover {
-          transform: scale(1.02);
-        }
-        
-        /* 响应式布局调整 */
-        @media (max-width: 1023px) {
-          .speaker-portrait-container {
-            min-height: 300px;
-          }
-        }
-      `}</style>
-    </div>
+         .highlight {
+           background-color: #fef08a;
+           padding: 2px 0;
+           border-radius: 3px;
+           animation: pulse 1.5s infinite;
+         }
+         @keyframes fadeInScale {
+           0% { opacity: 0; transform: scale(0.95);}
+           100% { opacity: 1; transform: scale(1);}
+         }
+       `}</style>
+    </>
   );
-};
+}
 
 export default SubtitleDisplay;
